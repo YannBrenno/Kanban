@@ -88,6 +88,8 @@ const btnNewEpic = document.getElementById('btnNewEpic');
 const btnNewStory = document.getElementById('btnNewStory');
 const btnManageEpics = document.getElementById('btnManageEpics');
 const btnExport = document.getElementById('btnExport');
+const btnImport = document.getElementById('btnImport');
+const fileImport = document.getElementById('fileImport');
 
 // Modal Épico
 const modalEpic = document.getElementById('modalEpic');
@@ -370,12 +372,62 @@ function handleDrop(e) {
 }
 
 // ────────────────────────────────────────────
-// Persistência
+// Persistência & Sincronização em Tempo Real
 // ────────────────────────────────────────────
+
+/**
+ * BroadcastChannel: permite que todas as abas/janelas
+ * do mesmo navegador se comuniquem em tempo real.
+ * Quando uma aba salva dados, notifica as outras.
+ */
+const syncChannel = new BroadcastChannel('adb_sync');
 
 function persist() {
   saveData(LS_EPICS, epics);
   saveData(LS_STORIES, stories);
+  // Notifica outras abas via BroadcastChannel
+  syncChannel.postMessage({ type: 'sync', timestamp: Date.now() });
+}
+
+/** Recebe notificação de outra aba e recarrega dados */
+syncChannel.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'sync') {
+    epics = loadData(LS_EPICS, []);
+    stories = loadData(LS_STORIES, []);
+    refreshEpicSelectors();
+    renderBoard();
+    flashSyncIndicator();
+  }
+});
+
+/**
+ * Fallback: evento 'storage' dispara quando OUTRA aba
+ * altera o localStorage (não dispara na mesma aba).
+ * Cobre navegadores que não suportam BroadcastChannel.
+ */
+window.addEventListener('storage', (e) => {
+  if (e.key === LS_EPICS || e.key === LS_STORIES) {
+    epics = loadData(LS_EPICS, []);
+    stories = loadData(LS_STORIES, []);
+    refreshEpicSelectors();
+    renderBoard();
+    flashSyncIndicator();
+  }
+});
+
+/** Pisca o indicador de sync ao receber atualização */
+function flashSyncIndicator() {
+  const dot = document.querySelector('.sync-dot');
+  const label = document.querySelector('.sync-label');
+  if (!dot || !label) return;
+  dot.style.background = 'var(--accent)';
+  label.textContent = 'Sync!';
+  label.style.color = 'var(--accent)';
+  setTimeout(() => {
+    dot.style.background = 'var(--success)';
+    label.textContent = 'Live';
+    label.style.color = 'var(--success)';
+  }, 1200);
 }
 
 // ────────────────────────────────────────────
@@ -701,6 +753,90 @@ btnExport.addEventListener('click', () => {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   showToast('Dados exportados com sucesso!', 'success');
+});
+
+// ────────────────────────────────────────────
+// IMPORTAÇÃO JSON
+// ────────────────────────────────────────────
+
+/** Abre seletor de arquivo ao clicar no botão Importar */
+btnImport.addEventListener('click', () => {
+  fileImport.value = '';
+  fileImport.click();
+});
+
+/** Processa o arquivo JSON selecionado */
+fileImport.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  if (!file.name.endsWith('.json')) {
+    showToast('Selecione um arquivo .json válido.', 'error');
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    try {
+      const data = JSON.parse(event.target.result);
+
+      // Valida estrutura básica
+      if (!data.epics || !Array.isArray(data.epics)) {
+        showToast('Formato inválido: campo "epics" não encontrado.', 'error');
+        return;
+      }
+
+      confirmAction(
+        'Importar dados irá SUBSTITUIR todos os dados atuais. Deseja continuar?',
+        () => {
+          // Extrai épicos e histórias do JSON importado
+          const importedEpics = [];
+          const importedStories = [];
+
+          data.epics.forEach(epic => {
+            importedEpics.push({
+              id: epic.id || uuid(),
+              title: epic.title || 'Sem título',
+              description: epic.description || '',
+              createdAt: epic.createdAt || new Date().toISOString()
+            });
+
+            if (epic.stories && Array.isArray(epic.stories)) {
+              epic.stories.forEach(story => {
+                importedStories.push({
+                  id: story.id || uuid(),
+                  title: story.title || 'Sem título',
+                  epicId: epic.id,
+                  description: story.description || '',
+                  status: COLUMNS.includes(story.status) ? story.status : COLUMNS[0],
+                  estimatedHours: story.estimatedHours || 0,
+                  workedHours: story.workedHours || 0,
+                  comments: Array.isArray(story.comments) ? story.comments : [],
+                  createdAt: story.createdAt || new Date().toISOString()
+                });
+              });
+            }
+          });
+
+          epics = importedEpics;
+          stories = importedStories;
+          persist();
+          refreshEpicSelectors();
+          renderBoard();
+
+          const totalStories = importedStories.length;
+          showToast(
+            `Importado: ${importedEpics.length} épico(s), ${totalStories} história(s)!`,
+            'success'
+          );
+        }
+      );
+    } catch (err) {
+      showToast('Erro ao ler o arquivo JSON: ' + err.message, 'error');
+    }
+  };
+
+  reader.readAsText(file);
 });
 
 // ────────────────────────────────────────────
