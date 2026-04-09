@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Azure DevOps Boards — Kanban</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- ==================== HEADER ==================== -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <rect x="2" y="2" width="8" height="8" rx="1" fill="#4fc3f7"/>
+          <rect x="12" y="2" width="8" height="8" rx="1" fill="#0288d1"/>
+          <rect x="2" y="14" width="8" height="8" rx="1" fill="#0288d1"/>
+          <rect x="12" y="14" width="8" height="8" rx="1" fill="#4fc3f7"/>
+        </svg>
+        <h1>DevOps Boards</h1>
+      </div>
+    </div>
+    <div class="header-center">
+      <div class="search-box">
+        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input type="text" id="searchInput" placeholder="Buscar histórias por título..." />
+      </div>
+      <div class="filter-box">
+        <label for="filterEpic">Épico:</label>
+        <select id="filterEpic">
+          <option value="">Todos</option>
+        </select>
+      </div>
+    </div>
+    <div class="header-right">
+      <button class="btn btn-accent" id="btnNewEpic" title="Novo Épico">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Épico
+      </button>
+      <button class="btn btn-primary" id="btnNewStory" title="Nova História">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        História
+      </button>
+      <button class="btn btn-outline" id="btnManageEpics" title="Gerenciar Épicos">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        Épicos
+      </button>
+      <button class="btn btn-outline" id="btnExport" title="Exportar JSON">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Exportar
+      </button>
+    </div>
+  </header>
+
+  <!-- ==================== BOARD ==================== -->
+  <main class="board" id="board">
+    <!-- As colunas são geradas pelo JavaScript -->
+  </main>
+
+  <!-- ==================== MODAL: ÉPICO (Criar / Editar) ==================== -->
+  <div class="modal-overlay" id="modalEpic">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="modalEpicTitle">Novo Épico</h2>
+        <button class="modal-close" data-close="modalEpic">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="epicId" />
+        <div class="form-group">
+          <label for="epicName">Título</label>
+          <input type="text" id="epicName" placeholder="Nome do épico" />
+        </div>
+        <div class="form-group">
+          <label for="epicDesc">Descrição</label>
+          <textarea id="epicDesc" rows="3" placeholder="Descreva o épico"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-close="modalEpic">Cancelar</button>
+        <button class="btn btn-primary" id="btnSaveEpic">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: GERENCIAR ÉPICOS ==================== -->
+  <div class="modal-overlay" id="modalManageEpics">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h2>Gerenciar Épicos</h2>
+        <button class="modal-close" data-close="modalManageEpics">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="epicsList" class="epics-list"></div>
+        <p id="epicsEmpty" class="empty-msg" style="display:none;">Nenhum épico cadastrado.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-close="modalManageEpics">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: HISTÓRIA (Criar / Editar) ==================== -->
+  <div class="modal-overlay" id="modalStory">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h2 id="modalStoryTitle">Nova História</h2>
+        <button class="modal-close" data-close="modalStory">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="storyId" />
+        <div class="form-row">
+          <div class="form-group flex-2">
+            <label for="storyName">Título</label>
+            <input type="text" id="storyName" placeholder="Título da história" />
+          </div>
+          <div class="form-group flex-1">
+            <label for="storyEpic">Épico</label>
+            <select id="storyEpic"></select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="storyDesc">Descrição</label>
+          <textarea id="storyDesc" rows="3" placeholder="Descreva a história"></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="storyStatus">Status (Coluna)</label>
+            <select id="storyStatus"></select>
+          </div>
+          <div class="form-group flex-1">
+            <label for="storyEstimated">Horas Estimadas</label>
+            <input type="number" id="storyEstimated" min="0" step="0.5" value="0" />
+          </div>
+          <div class="form-group flex-1">
+            <label for="storyWorked">Horas Trabalhadas</label>
+            <input type="number" id="storyWorked" min="0" step="0.5" value="0" />
+          </div>
+        </div>
+
+        <!-- Seção de comentários (só aparece na edição) -->
+        <div id="commentsSection" class="comments-section" style="display:none;">
+          <h3>Comentários</h3>
+          <div id="commentsList" class="comments-list"></div>
+          <div class="comment-add">
+            <textarea id="commentText" rows="2" placeholder="Escreva um comentário..."></textarea>
+            <button class="btn btn-accent btn-sm" id="btnAddComment">Comentar</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-close="modalStory">Cancelar</button>
+        <button class="btn btn-danger" id="btnDeleteStory" style="display:none;">Excluir</button>
+        <button class="btn btn-primary" id="btnSaveStory">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: CONFIRMAÇÃO ==================== -->
+  <div class="modal-overlay" id="modalConfirm">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <h2>Confirmação</h2>
+        <button class="modal-close" data-close="modalConfirm">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="confirmMsg">Tem certeza?</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-close="modalConfirm">Cancelar</button>
+        <button class="btn btn-danger" id="btnConfirmYes">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TOAST ==================== -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="script.js"></script>
+</body>
+</html>
