@@ -65,6 +65,41 @@ function formatDate(iso) {
   return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
+/**
+ * Calcula os dias restantes até a data alvo e retorna
+ * a classe CSS e o texto para o badge de deadline.
+ * - >= 5 dias → verde (safe)
+ * - 2 a 4 dias → amarelo (warn)
+ * - 0 a 1 dia → vermelho (danger)
+ * - negativo → vencido (overdue)
+ */
+function getDeadlineInfo(targetDate) {
+  if (!targetDate) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(targetDate + 'T00:00:00');
+  const diffMs = target - today;
+  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+  let cssClass, label;
+  if (diffDays < 0) {
+    cssClass = 'deadline-overdue';
+    label = `Vencido há ${Math.abs(diffDays)} dia(s)`;
+  } else if (diffDays <= 1) {
+    cssClass = 'deadline-danger';
+    label = diffDays === 0 ? 'Vence hoje!' : 'Vence amanhã';
+  } else if (diffDays <= 4) {
+    cssClass = 'deadline-warn';
+    label = `${diffDays} dias restantes`;
+  } else {
+    cssClass = 'deadline-safe';
+    label = `${diffDays} dias restantes`;
+  }
+
+  const formatted = target.toLocaleDateString('pt-BR');
+  return { cssClass, label, formatted, diffDays };
+}
+
 // ────────────────────────────────────────────
 // Estado da aplicação
 // ────────────────────────────────────────────
@@ -114,6 +149,7 @@ const storyDescInput = document.getElementById('storyDesc');
 const storyStatusSelect = document.getElementById('storyStatus');
 const storyEstimatedInput = document.getElementById('storyEstimated');
 const storyWorkedInput = document.getElementById('storyWorked');
+const storyTargetDateInput = document.getElementById('storyTargetDate');
 const commentsSection = document.getElementById('commentsSection');
 const commentsList = document.getElementById('commentsList');
 const commentTextInput = document.getElementById('commentText');
@@ -283,6 +319,9 @@ function createCard(story) {
   else if (pct >= 75) barColor = 'var(--warning)';
   else if (pct >= 50) barColor = 'var(--success)';
 
+  // Deadline info
+  const deadline = getDeadlineInfo(story.targetDate);
+
   card.innerHTML = `
     <span class="card-epic-tag" style="background:${epicColor}">${escapeHtml(epicName)}</span>
     <div class="card-title">${escapeHtml(story.title)}</div>
@@ -299,6 +338,12 @@ function createCard(story) {
     ${estimated > 0 ? `
       <div class="hours-bar">
         <div class="hours-bar-fill" style="width:${pct}%;background:${barColor}"></div>
+      </div>
+    ` : ''}
+    ${deadline ? `
+      <div class="card-deadline ${deadline.cssClass}" title="${deadline.label}">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        ${deadline.formatted} — ${deadline.label}
       </div>
     ` : ''}
   `;
@@ -320,7 +365,7 @@ function escapeHtml(str) {
 }
 
 // ────────────────────────────────────────────
-// Drag & Drop
+// Drag & Drop (com reordenação dentro da coluna)
 // ────────────────────────────────────────────
 
 let draggedCardId = null;
@@ -330,17 +375,36 @@ function handleDragStart(e) {
   this.classList.add('dragging');
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('text/plain', draggedCardId);
+  // Pequeno delay para que o navegador capture o snapshot visual
+  // antes de esconder visualmente
 }
 
 function handleDragEnd() {
   this.classList.remove('dragging');
   draggedCardId = null;
+  // Limpa todos os indicadores visuais
   document.querySelectorAll('.column-body').forEach(b => b.classList.remove('drag-over'));
+  document.querySelectorAll('.drop-indicator').forEach(el => el.remove());
 }
 
 function handleDragOver(e) {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
+
+  const columnBody = this;
+  // Remove indicadores antigos nesta coluna
+  columnBody.querySelectorAll('.drop-indicator').forEach(el => el.remove());
+
+  // Encontra a posição de inserção com base no mouse
+  const afterElement = getDragAfterElement(columnBody, e.clientY);
+  const indicator = document.createElement('div');
+  indicator.className = 'drop-indicator';
+
+  if (afterElement) {
+    columnBody.insertBefore(indicator, afterElement);
+  } else {
+    columnBody.appendChild(indicator);
+  }
 }
 
 function handleDragEnter(e) {
@@ -352,21 +416,77 @@ function handleDragLeave(e) {
   // Só remove se realmente saiu do container
   if (!this.contains(e.relatedTarget)) {
     this.classList.remove('drag-over');
+    this.querySelectorAll('.drop-indicator').forEach(el => el.remove());
   }
+}
+
+/**
+ * Determina após qual card o elemento arrastado deve ser inserido,
+ * comparando a posição Y do mouse com o centro de cada card.
+ */
+function getDragAfterElement(container, y) {
+  const cards = [...container.querySelectorAll('.card:not(.dragging)')];
+
+  let closest = null;
+  let closestOffset = Number.NEGATIVE_INFINITY;
+
+  cards.forEach(card => {
+    const box = card.getBoundingClientRect();
+    const offset = y - box.top - box.height / 2;
+    // Queremos o card cujo centro está logo ABAIXO do mouse (offset negativo mais próximo de 0)
+    if (offset < 0 && offset > closestOffset) {
+      closestOffset = offset;
+      closest = card;
+    }
+  });
+
+  return closest; // null significa "inserir no final"
 }
 
 function handleDrop(e) {
   e.preventDefault();
   this.classList.remove('drag-over');
+  this.querySelectorAll('.drop-indicator').forEach(el => el.remove());
+
   const storyId = e.dataTransfer.getData('text/plain');
   const newStatus = this.dataset.status;
   if (!storyId || !newStatus) return;
 
   const story = stories.find(s => s.id === storyId);
-  if (story && story.status !== newStatus) {
-    story.status = newStatus;
-    persist();
-    renderBoard();
+  if (!story) return;
+
+  const statusChanged = story.status !== newStatus;
+  story.status = newStatus;
+
+  // Calcula a nova ordem baseada na posição visual de drop
+  const afterElement = getDragAfterElement(this, e.clientY);
+  const afterStoryId = afterElement ? afterElement.dataset.id : null;
+
+  // Remove a história da lista e reinsere na posição correta
+  const storyObj = stories.splice(stories.findIndex(s => s.id === storyId), 1)[0];
+
+  if (afterStoryId) {
+    // Insere antes da história "after"
+    const afterIdx = stories.findIndex(s => s.id === afterStoryId);
+    stories.splice(afterIdx, 0, storyObj);
+  } else {
+    // Insere no final — coloca depois da última história desta coluna
+    // Encontra o último index de uma história com este status
+    let lastIdx = -1;
+    for (let i = stories.length - 1; i >= 0; i--) {
+      if (stories[i].status === newStatus) { lastIdx = i; break; }
+    }
+    if (lastIdx === -1) {
+      stories.push(storyObj);
+    } else {
+      stories.splice(lastIdx + 1, 0, storyObj);
+    }
+  }
+
+  persist();
+  renderBoard();
+
+  if (statusChanged) {
     showToast(`Movido para "${newStatus}"`, 'success');
   }
 }
@@ -581,6 +701,7 @@ btnNewStory.addEventListener('click', () => {
   storyDescInput.value = '';
   storyEstimatedInput.value = 0;
   storyWorkedInput.value = 0;
+  storyTargetDateInput.value = '';
   refreshEpicSelectors();
   storyStatusSelect.value = COLUMNS[0];
   commentsSection.style.display = 'none';
@@ -603,6 +724,7 @@ function openEditStory(storyId) {
   storyStatusSelect.value = story.status;
   storyEstimatedInput.value = story.estimatedHours || 0;
   storyWorkedInput.value = story.workedHours || 0;
+  storyTargetDateInput.value = story.targetDate || '';
 
   // Comentários
   commentsSection.style.display = 'block';
@@ -634,6 +756,7 @@ btnSaveStory.addEventListener('click', () => {
       story.status = storyStatusSelect.value;
       story.estimatedHours = parseFloat(storyEstimatedInput.value) || 0;
       story.workedHours = parseFloat(storyWorkedInput.value) || 0;
+      story.targetDate = storyTargetDateInput.value || '';
       showToast('História atualizada!', 'success');
     }
   } else {
@@ -646,6 +769,7 @@ btnSaveStory.addEventListener('click', () => {
       status: storyStatusSelect.value,
       estimatedHours: parseFloat(storyEstimatedInput.value) || 0,
       workedHours: parseFloat(storyWorkedInput.value) || 0,
+      targetDate: storyTargetDateInput.value || '',
       comments: [],
       createdAt: new Date().toISOString()
     });
@@ -737,6 +861,7 @@ btnExport.addEventListener('click', () => {
         status: s.status,
         estimatedHours: s.estimatedHours,
         workedHours: s.workedHours,
+        targetDate: s.targetDate || '',
         comments: s.comments || [],
         createdAt: s.createdAt
       }))
@@ -811,6 +936,7 @@ fileImport.addEventListener('change', (e) => {
                   status: COLUMNS.includes(story.status) ? story.status : COLUMNS[0],
                   estimatedHours: story.estimatedHours || 0,
                   workedHours: story.workedHours || 0,
+                  targetDate: story.targetDate || '',
                   comments: Array.isArray(story.comments) ? story.comments : [],
                   createdAt: story.createdAt || new Date().toISOString()
                 });
